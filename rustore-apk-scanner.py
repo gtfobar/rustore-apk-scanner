@@ -8,8 +8,7 @@ import logging
 import re
 # Download the file from `url` and save it locally under `file_name`:
 
-BASE_DIR = './'
-JSON_PATH = ''
+APK_BASE_DIR = './apk'
 CATEGORIES_URL = 'https://backapi.rustore.ru/applicationData/allCategory'
 APP_INFO_URL_TEMPLATE = 'https://backapi.rustore.ru/applicationData/findAll?category={category}&pageNumber=0&pageSize={page_size}'
 DOWNLOAD_LINK_URL = 'https://backapi.rustore.ru/applicationData/download-link'
@@ -19,7 +18,7 @@ USER_TOKEN = 'vk1.a.86BdzHbpnjTmgDToW22JBsF82MIj_hFab5n1lId2P_50NeFzrwE6yA5HzRqs
 INIT_PAGE_SIZE = 1000
 SMS_CONSENT_FINGERPRINT = 'EXTRA_CONSENT_INTENT'.encode('utf-8')
 
-logging.basicConfig(filename='example.log', format='%(levelname)s:%(message)s', level=logging.INFO)
+logging.basicConfig(filename='rustore-apk-scanner.log', format='%(levelname)s:%(message)s', level=logging.INFO)
 
 def get_categories_json(local_copy = False):
     categories_json = requests.get(CATEGORIES_URL).json()
@@ -76,7 +75,7 @@ def download_apk(appId, path):
 
 def decompile(in_apk, out_dir):
     logging.info(f'Decompiling {in_apk} to {out_dir}')
-    os.system(f'if [ ! -d {out_dir} ]; then unzip {in_apk} -d {out_dir} > /dev/null; fi')
+    os.system(f'if [ ! -d {out_dir} ]; then unzip -u {in_apk} -d {out_dir} > /dev/null; fi')
 
 def grep(path):
     # os.system(f' for f in $(find {path} -type f -name "*.dex"); do strings $f | grep EXTRA_CONSENT_INTENT; done}')
@@ -95,15 +94,16 @@ def uses_sms_consent_api(apk_path):
     decompiled_dir = f'{apk_path[:-4]}_decompiled'
     decompile(apk_path, decompiled_dir)
     grep(decompiled_dir)
-    # shutil.rmtree(decompiled_dir)
+    shutil.rmtree(decompiled_dir)
 
 def main():
+    logging.info("Starting...")
     apps = get_apps()
     for app in apps:
         packageName = app["packageName"]
         appId = app['appId']
         logging.info(f'{packageName} has appId={appId}')
-        apk_path = f'{packageName}.apk'
+        apk_path = os.path.join(APK_BASE_DIR, f'{packageName}.apk')
         download_apk(app['appId'], apk_path)
         if (not uses_sms_consent_api(apk_path)):
             os.remove(apk_path)
