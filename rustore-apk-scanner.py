@@ -6,7 +6,7 @@ import shutil
 import os
 import logging
 import re
-# Download the file from `url` and save it locally under `file_name`:
+import traceback
 
 APK_BASE_DIR = './apk'
 CATEGORIES_URL = 'https://backapi.rustore.ru/applicationData/allCategory'
@@ -16,7 +16,9 @@ POST_DATA_TEMPLATE = {"appId":5364415,"firstInstall":True}
 APPS_NUMBER_LIMIT = 5
 USER_TOKEN = 'vk1.a.86BdzHbpnjTmgDToW22JBsF82MIj_hFab5n1lId2P_50NeFzrwE6yA5HzRqsNTDxI5ToP0ADRZdygy1Ou2ses73rvbFDpXYgLqjf38Aebv3ks5ba27s5QpnX__AWvOG9bID_vuN-inGdfP4nhh9soJ4PsdepY-_21PaKMEWUfJQC0O0-wkpkgm-Ihm5y5-NXXfJ5bej279SlFhRnqjLpXA'
 INIT_PAGE_SIZE = 2000
-SMS_CONSENT_FINGERPRINT = 'EXTRA_CONSENT_INTENT'.encode('utf-8')
+SMS_CONSENT_USAGE_FINGERPRINT = 'EXTRA_CONSENT_INTENT'.encode('utf-8')
+SMS_CONSENT_PROTECTION_FINGERPRINT = 'com.google.android.gms.auth.api.phone.permission.SEND'.encode('utf-8')
+DEX_FILE_RE = '.*\.dex'
 LOG_FILE = 'rustore-apk-scanner.log'
 
 logging.basicConfig(filename=LOG_FILE, format='%(levelname)s:%(message)s', level=logging.INFO)
@@ -82,27 +84,34 @@ def decompile(in_apk, out_dir):
     if (not os.path.exists(out_dir)):
         os.system(f'unzip -u {in_apk} -d {out_dir} > /dev/null')
 
-def grep(path):
+
+def find_string_in_dex(path, string, re_filter='.*'):
     # os.system(f' for f in $(find {path} -type f -name "*.dex"); do strings $f | grep EXTRA_CONSENT_INTENT; done}')
-    file_extension_re = re.compile('.*\.dex')
-    logging.info(f'Looking for sms consent library usage in {path}...')
+    re_filter_obj = re.compile(re_filter)
     for root, dirs, fnames in os.walk(path):
         for fname in fnames:
-            if (not file_extension_re.match(fname)):
+            if (not re_filter_obj.match(fname)):
                 continue
             with open(os.path.join(root, fname), 'rb') as f:
-                if (f.read().find(SMS_CONSENT_FINGERPRINT) >= 0):
-                    logging.info(f'Sms consent library usage detected in {fname}.')
+                if (f.read().find(string) >= 0):
+                    logging.info(f'String {string} detected in {os.path.join(root, fname)}.')
                     return True
     return False
 
-def uses_sms_consent_api(apk_path):
+def uses_sms_consent_insecurely(apk_path):
     decompiled_dir = f'{apk_path[:-4]}_decompiled'
     decompile(apk_path, decompiled_dir)
-    result = grep(decompiled_dir)
-    shutil.rmtree(decompiled_dir)
-    logging.info(f'Search finished. Deleting {decompiled_dir}...')
-    return result
+    sms_consent_used = find_string_in_dex(decompiled_dir, SMS_CONSENT_USAGE_FINGERPRINT, DEX_FILE_RE)
+    if (not sms_consent_used):
+        logging.info(f'Sms consent library is not used in {apk_path}.')
+        return False
+    logging.info(f'Sms consent library usage detected. Checking if it is secure...')
+    broadcast_receiver_protected = find_string_in_dex(decompiled_dir, SMS_CONSENT_PROTECTION_FINGERPRINT, DEX_FILE_RE)
+    if (broadcast_receiver_protected):
+        logging.info(f'Broadcast receiver is protected with {SMS_CONSENT_PROTECTION_FINGERPRINT} permission.')
+        return False
+    logging.info(f'Insecure usage detected in {apk_path}.')
+    return True
 
 def main():
     print(f'Logging into {LOG_FILE}')
@@ -116,8 +125,12 @@ def main():
         logging.info(f'{packageName} has appId={appId}')
         apk_path = os.path.join(APK_BASE_DIR, f'{packageName}.apk')
         download_apk(app['appId'], apk_path)
-        if (not uses_sms_consent_api(apk_path) is True):
-            logging.info('Sms consent library not found. Deleting apk...')
+        if (not uses_sms_consent_insecurely(apk_path)):
             os.remove(apk_path)
+        shutil.rmtree(f'{apk_path[:-4]}_decompiled')
 
-main()
+try:
+    main()
+except Exception as e:
+    logging.error(f'Exception occured: {e}. Printing stacktrace:')
+    logging.error(traceback.format_exc())
