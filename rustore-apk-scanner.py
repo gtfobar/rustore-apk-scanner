@@ -13,7 +13,7 @@ CATEGORIES_URL = 'https://backapi.rustore.ru/applicationData/allCategory'
 APP_INFO_URL_TEMPLATE = 'https://backapi.rustore.ru/applicationData/findAll?category={category}&pageNumber=0&pageSize={page_size}'
 DOWNLOAD_LINK_URL = 'https://backapi.rustore.ru/applicationData/download-link'
 POST_DATA_TEMPLATE = {"appId":5364415,"firstInstall":True}
-APPS_NUMBER_LIMIT = 5
+APPS_NUMBER_LIMIT = 100000
 USER_TOKEN = 'vk1.a.86BdzHbpnjTmgDToW22JBsF82MIj_hFab5n1lId2P_50NeFzrwE6yA5HzRqsNTDxI5ToP0ADRZdygy1Ou2ses73rvbFDpXYgLqjf38Aebv3ks5ba27s5QpnX__AWvOG9bID_vuN-inGdfP4nhh9soJ4PsdepY-_21PaKMEWUfJQC0O0-wkpkgm-Ihm5y5-NXXfJ5bej279SlFhRnqjLpXA'
 INIT_PAGE_SIZE = 2000
 SMS_CONSENT_USAGE_FINGERPRINT = 'EXTRA_CONSENT_INTENT'.encode('utf-8')
@@ -65,11 +65,13 @@ def get_apk_url(appId, token=USER_TOKEN):
     headers = {'User-Token':USER_TOKEN}
     post_data = POST_DATA_TEMPLATE
     post_data['appId'] = appId
-    response_data = requests.post(DOWNLOAD_LINK_URL, json=post_data, headers=headers).json()
+    response = requests.post(DOWNLOAD_LINK_URL, json=post_data, headers=headers)
     try:
+        response_data = response.json()
         url = response_data['body']['apkUrl']
-    except KeyError as e:
-        logging.info(response_data)
+    except Exception as e:
+        logging.error(f'Exception occured while requesting download link for {appId}. Response from rustore is below.')
+        logging.error(response)
     logging.info(f'Got url for {appId}: {url}')
     return url
 
@@ -124,10 +126,14 @@ def main():
         appId = app['appId']
         logging.info(f'{packageName} has appId={appId}')
         apk_path = os.path.join(APK_BASE_DIR, f'{packageName}.apk')
-        download_apk(app['appId'], apk_path)
-        if (not uses_sms_consent_insecurely(apk_path)):
-            os.remove(apk_path)
-        shutil.rmtree(f'{apk_path[:-4]}_decompiled')
+        try:
+            download_apk(app['appId'], apk_path)
+            if (not uses_sms_consent_insecurely(apk_path)):
+                os.remove(apk_path)
+            shutil.rmtree(f'{apk_path[:-4]}_decompiled')
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            logging.error('Trying to resume...')
 
 try:
     main()
